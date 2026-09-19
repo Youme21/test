@@ -1,11 +1,14 @@
 /**
  * Nuvio Provider: TopCinema (توب سينما)
- * Compatible with Nuvio Local Scrapers
+ * No API Key required!
  */
 
-const TMDB_API_KEY = "YOUR_TMDB_API_KEY"; // Replace with your TMDB v3 API Key
 const BASE_URL = "https://topcinema.io";
 const AJAX_URL = "https://topcinema.io/wp-content/themes/movies2023/Ajaxat/";
+
+// Public metadata endpoints (completely free, zero API keys needed)
+const TMDB_ADDON_URL = "https://94c8cb9f702d-tmdb-addon.baby-beamup.club";
+const CINEMETA_URL = "https://v3-cinemeta.strem.io";
 
 const HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -14,16 +17,46 @@ const HEADERS = {
 };
 
 /**
- * 1. Fetch title and year from TMDB
+ * 1. Fetch title and year without any private API key
+ * Automatically handles:
+ *  - "tmdb:12345"
+ *  - Plain integer TMDB ID (e.g. 12345)
+ *  - IMDb ID (e.g. "tt0137523")
  */
-function getMetadata(tmdbId, mediaType) {
-    const url = `https://api.themoviedb.org/3/${mediaType}/${tmdbId}?api_key=${TMDB_API_KEY}`;
-    return fetch(url)
+function getMetadata(id, mediaType) {
+    const type = (mediaType === "movie") ? "movie" : "series";
+    const rawId = String(id).trim();
+
+    // If ID is from Cinemeta / IMDb (starts with 'tt')
+    if (rawId.startsWith("tt")) {
+        return fetch(`${CINEMETA_URL}/meta/${type}/${rawId}.json`)
+            .then(res => res.json())
+            .then(data => ({
+                title: data.meta ? (data.meta.name || data.meta.name_original) : "",
+                year: data.meta && data.meta.year ? data.meta.year : ""
+            }))
+            .catch(() => ({ title: "", year: "" }));
+    }
+
+    // If ID is from TMDB (starts with 'tmdb:' or is a numeric string)
+    const tmdbId = rawId.startsWith("tmdb:") ? rawId : `tmdb:${rawId}`;
+
+    return fetch(`${TMDB_ADDON_URL}/meta/${type}/${tmdbId}.json`)
         .then(res => res.json())
         .then(data => ({
-            title: data.title || data.name || data.original_name,
-            year: (data.release_date || data.first_air_date || "").split("-")[0]
-        }));
+            title: data.meta ? (data.meta.name || data.meta.name_original) : "",
+            year: data.meta && data.meta.year ? data.meta.year : ""
+        }))
+        .catch(() => {
+            // Fallback to Cinemeta if TMDB addon is unreachable
+            return fetch(`${CINEMETA_URL}/meta/${type}/${rawId}.json`)
+                .then(r => r.json())
+                .then(d => ({
+                    title: d.meta ? d.meta.name : "",
+                    year: d.meta && d.meta.year ? d.meta.year : ""
+                }))
+                .catch(() => ({ title: "", year: "" }));
+        });
 }
 
 /**
@@ -41,11 +74,9 @@ function searchTopCinema(title, mediaType) {
     })
     .then(res => res.text())
     .then(html => {
-        // Extract post URLs from search result HTML
         const hrefMatches = html.match(/href=["'](https:\/\/topcinema\.io\/[^"']+)["']/g);
         if (!hrefMatches || hrefMatches.length === 0) return null;
         
-        // Clean URL
         const matchedUrl = hrefMatches[0].replace(/href=["']/g, "").replace(/["']$/, "");
         return matchedUrl;
     });
@@ -62,7 +93,7 @@ function getWatchServers(pageUrl) {
         .then(html => {
             const servers = [];
 
-            // Extract the default loaded iframe
+            // Extract default loaded iframe
             const defaultIframeMatch = html.match(/<div class="player--iframe"[^>]*>[\s\S]*?<iframe[^>]+src=["']([^"']+)["']/i);
             if (defaultIframeMatch && defaultIframeMatch[1]) {
                 servers.push({
@@ -71,7 +102,7 @@ function getWatchServers(pageUrl) {
                 });
             }
 
-            // Extract all server items from <li data-id="236949" data-server="1" class="server--item"><span>ServerName</span></li>
+            // Extract server items
             const serverRegex = /<li[^>]+data-id=["'](\d+)["'][^>]+data-server=["'](\d+)["'][^>]*>[\s\S]*?<span>([^<]+)<\/span>/gi;
             let match;
             const fetchPromises = [];
@@ -81,7 +112,6 @@ function getWatchServers(pageUrl) {
                 const serverIndex = match[2];
                 const serverName = match[3].trim();
 
-                // Skip the first one if already loaded as default
                 if (serverIndex === "0") continue;
 
                 const postData = new URLSearchParams();
@@ -135,10 +165,9 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
             .then(servers => {
                 if (!servers || servers.length === 0) return resolve([]);
 
-                // Format streams for Nuvio player
                 const streams = servers.map(srv => ({
                     name: srv.name,
-                    title: srv.name + " (Arabic Sub/Dub)",
+                    title: srv.name + " (Arabic)",
                     url: srv.url,
                     quality: "1080p",
                     headers: {
@@ -156,7 +185,6 @@ function getStreams(tmdbId, mediaType, seasonNum, episodeNum) {
     });
 }
 
-// Module export for Nuvio environment
 if (typeof module !== "undefined" && module.exports) {
     module.exports = { getStreams };
 } else {
