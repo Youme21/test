@@ -1,5 +1,4 @@
-[
-  {
+{
     "id": "topcinema",
     "name": "TopCinema",
     "description": "Arabic and translated movies and series from TopCinema.io",
@@ -24,5 +23,4 @@
     "limited": false,
     "disabledPlatforms": [],
     "supportsExternalPlayer": true
-  }
-]
+}
